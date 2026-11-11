@@ -548,7 +548,13 @@ function renderOverall() {
   $("overallPercent").textContent = `${pct}%`;
   $("overallProgress").style.width = `${pct}%`;
   $("totalLabel").textContent = `${total} intentions`;
-  $("sessionNote").textContent = `${total} intentions · ${categories.length} categories · One stronger you`;
+  if (pct >= 100) {
+    $("sessionNote").innerHTML = `🌟 <strong>Daily ritual complete!</strong> All ${total} intentions sealed today.`;
+    $("sessionNote").style.color = "var(--gold)";
+  } else {
+    $("sessionNote").textContent = `${total} intentions · ${categories.length} categories · One stronger you`;
+    $("sessionNote").style.color = "";
+  }
   updateStreakBadge();
 }
 
