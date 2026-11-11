@@ -38,7 +38,21 @@
       <div class="progress-track"><div id="categoryProgress" class="progress-fill"></div></div>
       <p class="wish-kicker" id="wishKicker">WISH NO. 1</p>
       <h2 id="wishText">I enjoy excellent physical, mental and emotional health throughout my life.</h2>
+
+      <!-- Inline wish editor (hidden by default) -->
+      <div id="editPanel" class="edit-panel" hidden>
+        <textarea id="editTextarea" class="edit-textarea" rows="4" maxlength="300" placeholder="Write your intention…"></textarea>
+        <div class="edit-actions">
+          <button class="secondary-btn" id="resetWishBtn">↺ Reset to default</button>
+          <div class="edit-action-right">
+            <button class="secondary-btn" id="cancelEditBtn">Cancel</button>
+            <button class="primary-btn" id="saveWishBtn">Save wish ✓</button>
+          </div>
+        </div>
+      </div>
+
       <p id="reading-prompt" class="reading-prompt">READ&nbsp; · &nbsp;REFLECT&nbsp; · &nbsp;BELIEVE&nbsp; · &nbsp;ACT</p>
+      <button class="edit-wish-btn" id="editWishBtn" title="Edit this wish">✎ Edit wish</button>
       <div class="controls">
         <button class="secondary-btn" id="prevBtn" disabled>← Previous</button>
         <button class="primary-btn" id="nextBtn">Next wish →</button>
@@ -77,6 +91,18 @@
     <div class="setting-divider"></div>
     <button class="secondary-btn full" id="resetProgress">Reset today's reading progress</button>
     <p class="setting-help">Your wishes and reading position are stored locally on this device.</p>
+    <div class="setting-divider"></div>
+    <button class="secondary-btn full" id="manageWishesBtn">✎ Manage all wishes</button>
+    <p class="setting-help">Edit, personalise or restore any of your 44 intentions.</p>
+  </dialog>
+
+  <!-- Manage Wishes Dialog -->
+  <dialog id="manageWishesDialog">
+    <form method="dialog" class="dialog-head">
+      <div><p class="eyebrow">PERSONALISE</p><h2>Your wishes</h2></div>
+      <button class="icon-btn" aria-label="Close">✕</button>
+    </form>
+    <div id="manageWishesList" class="manage-wishes-list"></div>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="./app.js"></script>
