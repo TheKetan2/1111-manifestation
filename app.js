@@ -190,8 +190,17 @@ function isDefaultWish(ci, wi) {
 
 // ─── Alarms ───────────────────────────────────────────────────────
 function loadAlarms() {
-  try { return JSON.parse(localStorage.getItem(SK.ALARMS) || "[]"); }
-  catch { return []; }
+  try {
+    const saved = localStorage.getItem(SK.ALARMS);
+    if (saved) return JSON.parse(saved);
+    const legacy = localStorage.getItem("1111-reminder");
+    if (legacy) {
+      const migrated = [{ time: legacy, label: "Daily reminder", enabled: true }];
+      localStorage.setItem(SK.ALARMS, JSON.stringify(migrated));
+      return migrated;
+    }
+  } catch {}
+  return [];
 }
 function saveAlarms(list) { localStorage.setItem(SK.ALARMS, JSON.stringify(list)); }
 
@@ -629,20 +638,115 @@ $("cancelEditBtn").addEventListener("click", closeEditMode);
 $("saveWishBtn").addEventListener("click", saveCurrentWish);
 $("resetWishBtn").addEventListener("click", resetCurrentWish);
 
+// ─── Category Complete Flair & Celebrations ───────────────────────
+const categoryFlair = [
+  {
+    themeClass: "flair-health",
+    icon: "🧬",
+    kicker: "HEALTH COMPLETED",
+    title: "Vitality & Strength Sealed",
+    desc: "Your body is your sanctuary. Radiance, cellular vitality, and vibrant energy are yours.",
+    particles: ["🧬", "🌿", "✨", "✦", "💚"],
+    chimes: [523.25, 659.25, 783.99, 1046.50]
+  },
+  {
+    themeClass: "flair-wealth",
+    icon: "💰",
+    kicker: "WEALTH COMPLETED",
+    title: "Abundance Mindset Activated",
+    desc: "Wealth flows into your life naturally through valuable skills, intelligent decisions, and consistent discipline.",
+    particles: ["💰", "🪙", "✨", "✦", "⭐"],
+    chimes: [587.33, 739.99, 880.00, 1174.66]
+  },
+  {
+    themeClass: "flair-career",
+    icon: "🎯",
+    kicker: "CAREER COMPLETED",
+    title: "Focus & Authority Aligned",
+    desc: "You possess the competence, reputation, and clarity to excel and conquer your highest goals.",
+    particles: ["🎯", "⚡", "🏆", "✦", "🔥"],
+    chimes: [659.25, 830.61, 987.77, 1318.51]
+  },
+  {
+    themeClass: "flair-relationship",
+    icon: "❤️",
+    kicker: "RELATIONSHIP COMPLETED",
+    title: "Love & Harmony Welcomed",
+    desc: "You deserve unconditional love, mutual respect, genuine loyalty, and peaceful connection.",
+    particles: ["❤️", "💖", "🌸", "✨", "✦"],
+    chimes: [698.46, 880.00, 1046.50, 1396.91]
+  }
+];
+
+function playCelebrationSound(freqs) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.1);
+      gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.1);
+      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.1 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.1 + 1.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.1);
+      osc.stop(ctx.currentTime + i * 0.1 + 1.25);
+    });
+  } catch {}
+}
+
+function showCategoryComplete() {
+  const flair = categoryFlair[categoryIndex] || categoryFlair[0];
+  const cat = categories[categoryIndex];
+
+  const panel = $("completePanel");
+  panel.className = `complete-panel ${flair.themeClass}`;
+
+  $("completeIcon").textContent = flair.icon;
+  $("completeKicker").textContent = flair.kicker;
+  $("completeTitle").textContent = flair.title;
+  $("completeDesc").textContent = `${flair.desc} (Finished all ${cat.wishes.length} intentions)`;
+
+  const particlesContainer = $("completeParticles");
+  if (particlesContainer) {
+    particlesContainer.innerHTML = flair.particles.map((p, idx) => {
+      const left = 8 + (idx * 21) + (Math.random() * 8);
+      const delay = (idx * 0.35).toFixed(2);
+      const duration = (2.2 + (idx % 3) * 0.4).toFixed(2);
+      return `<span class="particle" style="left:${left}%; animation-delay:${delay}s; animation-duration:${duration}s;">${p}</span>`;
+    }).join("");
+  }
+
+  $("wishKicker").hidden = true;
+  $("wishText").hidden = true;
+  $("reading-prompt").hidden = true;
+  $("prevBtn").hidden = true;
+  $("nextBtn").hidden = true;
+  $("editWishBtn").hidden = true;
+  panel.hidden = false;
+
+  playCelebrationSound(flair.chimes);
+
+  renderCategories();
+  renderOverall();
+}
+
 // ─── Navigation ───────────────────────────────────────────────────
 function markRead() {
   readSet.add(wishKey(categoryIndex, wishIndex));
   localStorage.setItem(SK.READ, JSON.stringify([...readSet]));
 }
 
-$("prevBtn").addEventListener("click", () => {
+function goPrev() {
   if (wishIndex > 0) {
     wishIndex--;
     render("prev");
   }
-});
+}
 
-$("nextBtn").addEventListener("click", () => {
+function goNext() {
   markRead();
   recordDailyProgress();
   const totalInCat = categories[categoryIndex].wishes.length;
@@ -651,21 +755,48 @@ $("nextBtn").addEventListener("click", () => {
     render("next");
     return;
   }
-  $("wishKicker").hidden = true;
-  $("wishText").hidden = true;
-  $("reading-prompt").hidden = true;
-  $("prevBtn").hidden = true;
-  $("nextBtn").hidden = true;
-  $("editWishBtn").hidden = true;
-  $("completePanel").hidden = false;
-  renderCategories();
-  renderOverall();
+  showCategoryComplete();
+}
+
+$("prevBtn").addEventListener("click", goPrev);
+$("nextBtn").addEventListener("click", goNext);
+
+$("nextCategoryBtn").addEventListener("click", () => {
+  categoryIndex = (categoryIndex + 1) % categories.length;
+  wishIndex = 0;
+  render("next");
 });
 
 $("restartBtn").addEventListener("click", () => {
   wishIndex = 0;
   render("next");
 });
+
+// Touch swipe gestures on reading card
+let touchStartX = 0;
+let touchStartY = 0;
+const cardEl = document.querySelector(".reading-card");
+if (cardEl) {
+  cardEl.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 1) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  cardEl.addEventListener("touchend", (e) => {
+    if (!e.changedTouches.length) return;
+    const diffX = e.changedTouches[0].clientX - touchStartX;
+    const diffY = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+      if (diffX < 0) {
+        goNext();
+      } else {
+        goPrev();
+      }
+    }
+  }, { passive: true });
+}
 
 // ─── Manage Wishes Dialog ─────────────────────────────────────────
 function renderManageWishes() {

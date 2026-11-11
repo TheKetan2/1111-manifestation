@@ -64,10 +64,18 @@
         <button class="primary-btn" id="nextBtn">Next wish →</button>
       </div>
       <div id="completePanel" class="complete-panel" hidden>
-        <div class="complete-icon">✦</div>
-        <h2>Category completed</h2>
-        <p id="completePanelText">You have finished all intentions in this category.</p>
-        <button class="primary-btn" id="restartBtn">Read again</button>
+        <div class="complete-particles" id="completeParticles" aria-hidden="true"></div>
+        <div class="complete-badge-wrapper">
+          <div class="complete-halo"></div>
+          <div class="complete-badge-icon" id="completeIcon">✦</div>
+        </div>
+        <p class="complete-kicker" id="completeKicker">CATEGORY COMPLETED</p>
+        <h2 id="completeTitle">Category Completed</h2>
+        <p id="completeDesc" class="complete-desc">You have sealed all intentions in this category.</p>
+        <div class="complete-actions">
+          <button class="primary-btn" id="nextCategoryBtn">Next category →</button>
+          <button class="secondary-btn" id="restartBtn">↺ Read again</button>
+        </div>
       </div>
     </section>
 
