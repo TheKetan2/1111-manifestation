@@ -1,4 +1,8 @@
-// ─── Default wishes (source of truth) ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//  11:11 Manifestation — app.js
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Default wishes ───────────────────────────────────────────────
 const defaultCategories = [
  {name:"Health",emoji:"🧬",wishes:[
  "I enjoy excellent physical, mental and emotional health throughout my life.",
@@ -54,57 +58,331 @@ const defaultCategories = [
  ]}
 ];
 
-// ─── Custom wishes storage ────────────────────────────────────────────────────
-// Stored as: { "0:3": "custom text", ... }  (categoryIndex:wishIndex)
-const CUSTOM_KEY = "1111-custom-wishes";
+// ─── Storage keys ─────────────────────────────────────────────────
+const SK = {
+  CATEGORIES: "1111-categories",
+  CUSTOM:     "1111-custom-wishes",   // legacy – migrated on load
+  READ:       "1111-read",
+  ALARMS:     "1111-alarms",
+};
 
-function loadCustomWishes() {
-  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || "{}"); }
-  catch { return {}; }
-}
-function saveCustomWishes(map) {
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(map));
-}
-function wishKey(c, w) { return `${c}:${w}`; }
+// ─── Migrate legacy custom-wishes format ──────────────────────────
+(function migrateStorage() {
+  if (localStorage.getItem(SK.CATEGORIES)) return; // already migrated
+  const old = localStorage.getItem(SK.CUSTOM);
+  if (!old) return;
+  try {
+    const customWishes = JSON.parse(old);
+    const cats = defaultCategories.map(c => ({ name: c.name, emoji: c.emoji, wishes: [...c.wishes] }));
+    for (const [key, text] of Object.entries(customWishes)) {
+      const [ci, wi] = key.split(":").map(Number);
+      if (cats[ci]?.wishes[wi] !== undefined) cats[ci].wishes[wi] = text;
+    }
+    localStorage.setItem(SK.CATEGORIES, JSON.stringify(cats));
+    localStorage.removeItem(SK.CUSTOM);
+  } catch {}
+})();
 
-// Build live categories array (defaults merged with custom overrides)
-let customWishes = loadCustomWishes();
-let categories = buildCategories();
+// ─── Categories ───────────────────────────────────────────────────
+function loadCategories() {
+  try {
+    const s = localStorage.getItem(SK.CATEGORIES);
+    if (s) return JSON.parse(s);
+  } catch {}
+  return defaultCategories.map(c => ({ name: c.name, emoji: c.emoji, wishes: [...c.wishes] }));
+}
+function saveCategories() { localStorage.setItem(SK.CATEGORIES, JSON.stringify(categories)); }
 
-function buildCategories() {
-  const cw = loadCustomWishes();
-  return defaultCategories.map((cat, ci) => ({
-    ...cat,
-    wishes: cat.wishes.map((w, wi) => cw[wishKey(ci, wi)] ?? w)
-  }));
+let categories = loadCategories();
+
+function isDefaultWish(ci, wi) {
+  return categories[ci]?.wishes[wi] === defaultCategories[ci]?.wishes[wi];
 }
 
-function getWish(ci, wi) {
-  return customWishes[wishKey(ci, wi)] ?? defaultCategories[ci].wishes[wi];
+// ─── Alarms ───────────────────────────────────────────────────────
+// alarm shape: { time: "07:30", label: "Morning ritual", enabled: true }
+function loadAlarms() {
+  try { return JSON.parse(localStorage.getItem(SK.ALARMS) || "[]"); }
+  catch { return []; }
 }
-function isCustomised(ci, wi) {
-  return wishKey(ci, wi) in customWishes;
-}
+function saveAlarms(list) { localStorage.setItem(SK.ALARMS, JSON.stringify(list)); }
 
-// ─── App state ─────────────────────────────────────────────────────────────────
+let alarms = loadAlarms();
+let inPageTimers = []; // setTimeout handles for foreground fallback
+
+// ─── App state ────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 let categoryIndex = 0;
 let wishIndex = 0;
-let editMode = false;
-let readSet = new Set(JSON.parse(localStorage.getItem("1111-read") || "[]"));
-let reminder = localStorage.getItem("1111-reminder") || "07:00";
-let reminderTimer = null;
+let readSet = new Set(JSON.parse(localStorage.getItem(SK.READ) || "[]"));
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────
 function totalWishes() { return categories.reduce((n, c) => n + c.wishes.length, 0); }
-function toast(message) {
+function wishKey(ci, wi) { return `${ci}:${wi}`; }
+function escapeHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function toast(msg, duration = 2400) {
   const el = $("toast");
-  el.textContent = message;
+  el.textContent = msg;
   el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 2200);
+  setTimeout(() => el.classList.remove("show"), duration);
+}
+function msUntilTime(timeStr) {
+  const [h, m] = timeStr.split(":").map(Number);
+  const now = new Date(), target = new Date(now);
+  target.setHours(h, m, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return target - now;
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
+// ─── Alarm Sound (Web Audio API — works in-page) ──────────────────
+function playAlarmSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    function bell(freq, start, duration) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    }
+    // Three bell tones — classic alarm pattern
+    bell(880, 0,   1.2);
+    bell(880, 0.5, 1.2);
+    bell(1047, 1.1, 1.5);
+    bell(880, 1.6, 1.2);
+    bell(880, 2.1, 1.2);
+    bell(1047, 2.6, 2.0);
+  } catch {}
+}
+
+// ─── Notifications ────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) return "unsupported";
+  if (Notification.permission === "granted") return "granted";
+  if (Notification.permission === "denied") return "denied";
+  try { return await Notification.requestPermission(); }
+  catch { return "denied"; }
+}
+
+async function getSW() {
+  if (!("serviceWorker" in navigator)) return null;
+  try { return await navigator.serviceWorker.ready; } catch { return null; }
+}
+
+// Send alarm schedule to SW so it can fire even when page is backgrounded
+async function pushAlarmsToSW(list) {
+  const reg = await getSW();
+  if (!reg || !reg.active) return;
+  reg.active.postMessage({ type: "SCHEDULE_ALARM", alarms: list });
+}
+
+// Register periodic background sync (Chrome/Android — fires even when closed)
+async function registerPeriodicSync(reg) {
+  if (!("periodicSync" in reg)) return;
+  try {
+    const status = await navigator.permissions.query({ name: "periodic-background-sync" });
+    if (status.state !== "granted") return;
+    // Register with minimum interval of 1 day
+    await reg.periodicSync.register("1111-alarm", { minInterval: 24 * 60 * 60 * 1000 });
+  } catch {}
+}
+
+// In-page fallback: setTimeout inside the page (while page is open/visible)
+function scheduleInPageAlarms(list) {
+  inPageTimers.forEach(clearTimeout);
+  inPageTimers = [];
+  list.forEach(alarm => {
+    if (!alarm.enabled) return;
+    const ms = msUntilTime(alarm.time);
+    const t = setTimeout(() => {
+      playAlarmSound();
+      showInPageAlarmBanner(alarm.label || "Time for your daily intentions!");
+      // Also fire SW notification if permission granted
+      if (Notification.permission === "granted") {
+        new Notification("🔔 11:11 Manifestation", {
+          body: alarm.label || "Time for your daily intentions. Open the app and begin.",
+          icon: "./icons/icon-192.png",
+          tag: "1111-alarm",
+          requireInteraction: true,
+          vibrate: [300, 150, 300, 150, 600],
+        });
+      }
+      // Re-arm for next day
+      const t2 = setTimeout(() => scheduleInPageAlarms(list), 1000);
+      inPageTimers.push(t2);
+    }, ms);
+    inPageTimers.push(t);
+  });
+}
+
+function showInPageAlarmBanner(message) {
+  const banner = $("alarmBanner");
+  $("alarmBannerMsg").textContent = message;
+  banner.hidden = false;
+  banner.classList.add("visible");
+  // Dismiss automatically after 60s
+  const t = setTimeout(() => dismissAlarmBanner(), 60000);
+  banner._dismissTimer = t;
+}
+
+function dismissAlarmBanner() {
+  const banner = $("alarmBanner");
+  clearTimeout(banner._dismissTimer);
+  banner.classList.remove("visible");
+  setTimeout(() => { banner.hidden = true; }, 350);
+}
+
+// ─── Update notification status text ─────────────────────────────
+function updateNotifStatus() {
+  const el = $("notifStatus");
+  if (!("Notification" in window)) {
+    el.innerHTML = "⚠️ Notifications are <strong>not supported</strong> in this browser.";
+    return;
+  }
+  const perm = Notification.permission;
+  if (perm === "granted") {
+    el.innerHTML = "✅ Notifications <strong>enabled</strong>. Alarms will fire even when app is in background.";
+    el.style.color = "#6fcc8f";
+  } else if (perm === "denied") {
+    el.innerHTML = "🚫 Notifications <strong>blocked</strong>. Please allow in browser/OS settings then reload.";
+    el.style.color = "#e07070";
+  } else {
+    el.innerHTML = "🔔 Notifications <strong>not yet enabled</strong>. Save an alarm to grant permission.";
+    el.style.color = "";
+  }
+}
+
+// ─── Alarm settings UI ────────────────────────────────────────────
+function renderAlarmList() {
+  const container = $("alarmList");
+  if (!alarms.length) {
+    container.innerHTML = `<p class="no-alarms-hint">No alarms set. Add one below.</p>`;
+    return;
+  }
+  container.innerHTML = alarms.map((a, i) => `
+    <div class="alarm-row" data-index="${i}">
+      <label class="alarm-toggle" title="${a.enabled ? "Enabled" : "Disabled"}">
+        <input type="checkbox" class="alarm-enabled" ${a.enabled ? "checked" : ""}>
+        <span class="alarm-toggle-track"></span>
+      </label>
+      <input type="time" class="alarm-time-input" value="${a.time}">
+      <input type="text" class="alarm-label-input" value="${escapeHtml(a.label || "")}" placeholder="Label (optional)" maxlength="40">
+      <button class="alarm-del-btn" title="Remove alarm" data-index="${i}">×</button>
+    </div>
+  `).join("");
+
+  // Wire toggle, time, label, delete events
+  container.querySelectorAll(".alarm-row").forEach(row => {
+    const idx = Number(row.dataset.index);
+    row.querySelector(".alarm-enabled").addEventListener("change", e => {
+      alarms[idx].enabled = e.target.checked;
+    });
+    row.querySelector(".alarm-time-input").addEventListener("change", e => {
+      alarms[idx].time = e.target.value;
+    });
+    row.querySelector(".alarm-label-input").addEventListener("input", e => {
+      alarms[idx].label = e.target.value;
+    });
+    row.querySelector(".alarm-del-btn").addEventListener("click", () => {
+      alarms.splice(idx, 1);
+      renderAlarmList();
+    });
+  });
+}
+
+$("addAlarmBtn").addEventListener("click", () => {
+  if (alarms.length >= 5) { toast("Maximum 5 alarms allowed."); return; }
+  alarms.push({ time: "07:00", label: "", enabled: true });
+  renderAlarmList();
+});
+
+$("saveAlarms").addEventListener("click", async () => {
+  const perm = await requestNotificationPermission();
+  updateNotifStatus();
+  if (perm === "denied") {
+    toast("⚠️ Permission denied. Allow notifications in settings.", 3500);
+    return;
+  }
+  saveAlarms(alarms);
+  scheduleInPageAlarms(alarms);
+  pushAlarmsToSW(alarms);
+  const reg = await getSW();
+  if (reg) registerPeriodicSync(reg);
+  $("settingsDialog").close();
+  const count = alarms.filter(a => a.enabled).length;
+  toast(count ? `✅ ${count} alarm${count > 1 ? "s" : ""} saved!` : "Alarms saved (all disabled).");
+});
+
+$("testAlarmBtn").addEventListener("click", async () => {
+  const perm = await requestNotificationPermission();
+  updateNotifStatus();
+  playAlarmSound();
+  showInPageAlarmBanner("🔔 Test alarm — your intentions await!");
+  if (perm === "granted") {
+    const reg = await getSW();
+    if (reg?.active) {
+      reg.active.postMessage({ type: "FIRE_TEST", label: "🔔 Test alarm — time for your daily intentions!" });
+    } else {
+      new Notification("🔔 11:11 Manifestation", {
+        body: "Test alarm — time for your daily intentions!",
+        icon: "./icons/icon-192.png",
+        requireInteraction: true,
+      });
+    }
+  }
+});
+
+// Alarm banner dismiss events
+$("alarmBannerClose").addEventListener("click", dismissAlarmBanner);
+$("alarmBannerOpen").addEventListener("click", () => {
+  dismissAlarmBanner();
+  // scroll to reading card
+  document.querySelector(".reading-card").scrollIntoView({ behavior: "smooth" });
+});
+
+// ─── Settings dialog open ─────────────────────────────────────────
+$("settingsBtn").addEventListener("click", () => {
+  alarms = loadAlarms(); // refresh from storage
+  renderAlarmList();
+  updateNotifStatus();
+  $("settingsDialog").showModal();
+});
+
+// ─── Reading progress reset ───────────────────────────────────────
+$("resetProgress").addEventListener("click", () => {
+  if (confirm("Reset all reading progress on this device?")) {
+    readSet = new Set();
+    localStorage.removeItem(SK.READ);
+    $("settingsDialog").close();
+    render();
+    toast("Reading progress reset");
+  }
+});
+
+// ─── Manage Wishes button ─────────────────────────────────────────
+$("manageWishesBtn").addEventListener("click", () => {
+  $("settingsDialog").close();
+  renderManageWishes();
+  $("manageWishesDialog").showModal();
+});
+
+// ─── SW message listener (acks from SW) ───────────────────────────
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", event => {
+    if (event.data?.type === "ALARMS_SCHEDULED") {
+      console.log(`SW acknowledged ${event.data.count} alarm(s) scheduled.`);
+    }
+  });
+}
+
+// ─── Render: categories grid ──────────────────────────────────────
 function renderCategories() {
   $("categoryGrid").innerHTML = categories.map((c, i) =>
     `<button class="category-btn ${i === categoryIndex ? "active" : ""}" data-category="${i}">
@@ -121,23 +399,36 @@ function renderCategories() {
   );
 }
 
+// ─── Render: overall progress ─────────────────────────────────────
+function renderOverall() {
+  const count = readSet.size, total = totalWishes(), pct = Math.round(count / total * 100);
+  $("readCount").textContent = `${count} / ${total}`;
+  $("overallPercent").textContent = `${pct}%`;
+  $("overallProgress").style.width = `${pct}%`;
+  $("totalLabel").textContent = `${total} intentions`;
+  $("sessionNote").textContent = `${total} intentions · ${categories.length} categories · One stronger you`;
+}
+
+// ─── Render: reading card ─────────────────────────────────────────
 function render() {
   const c = categories[categoryIndex];
-  const wish = getWish(categoryIndex, wishIndex);
+  const totalInCat = c.wishes.length;
+  // Clamp index in case wishes were deleted
+  wishIndex = Math.min(wishIndex, totalInCat - 1);
+  const wish = c.wishes[wishIndex];
 
   $("categoryLabel").textContent = `${c.emoji} ${c.name.toUpperCase()}`;
-  $("wishCounter").textContent = `${String(wishIndex + 1).padStart(2, "0")} / 11`;
+  $("wishCounter").textContent = `${String(wishIndex + 1).padStart(2, "0")} / ${totalInCat}`;
   $("wishKicker").textContent = `WISH NO. ${wishIndex + 1}`;
   $("wishText").textContent = wish;
-  $("categoryProgress").style.width = `${(wishIndex + 1) / c.wishes.length * 100}%`;
+  $("categoryProgress").style.width = `${(wishIndex + 1) / totalInCat * 100}%`;
   $("prevBtn").disabled = wishIndex === 0;
-  $("nextBtn").textContent = wishIndex === 10 ? "Complete category ✓" : "Next wish →";
+  $("nextBtn").textContent = wishIndex === totalInCat - 1 ? "Complete category ✓" : "Next wish →";
   $("completePanel").hidden = true;
 
-  // Show/hide customised indicator on edit button
   const editBtn = $("editWishBtn");
-  editBtn.textContent = isCustomised(categoryIndex, wishIndex) ? "✎ Edited" : "✎ Edit wish";
-  editBtn.classList.toggle("edited", isCustomised(categoryIndex, wishIndex));
+  editBtn.textContent = isDefaultWish(categoryIndex, wishIndex) ? "✎ Edit wish" : "✎ Edited";
+  editBtn.classList.toggle("edited", !isDefaultWish(categoryIndex, wishIndex));
 
   $("wishKicker").hidden = false;
   $("wishText").hidden = false;
@@ -151,49 +442,35 @@ function render() {
   renderOverall();
 }
 
-function renderOverall() {
-  const count = readSet.size, total = totalWishes(), pct = Math.round(count / total * 100);
-  $("readCount").textContent = `${count} / ${total}`;
-  $("overallPercent").textContent = `${pct}%`;
-  $("overallProgress").style.width = `${pct}%`;
-  $("totalLabel").textContent = `${total} intentions`;
-}
-
-// ─── Edit mode ────────────────────────────────────────────────────────────────
+// ─── Inline wish editor ───────────────────────────────────────────
 function openEditMode() {
-  editMode = true;
-  const wish = getWish(categoryIndex, wishIndex);
-  $("editTextarea").value = wish;
+  $("editTextarea").value = categories[categoryIndex].wishes[wishIndex];
   $("editPanel").hidden = false;
   $("wishText").hidden = true;
   $("reading-prompt").hidden = true;
   $("editWishBtn").hidden = true;
   $("editTextarea").focus();
 }
-
 function closeEditMode() {
-  editMode = false;
   $("editPanel").hidden = true;
   $("wishText").hidden = false;
   $("reading-prompt").hidden = false;
   $("editWishBtn").hidden = false;
 }
-
 function saveCurrentWish() {
   const text = $("editTextarea").value.trim();
   if (!text) { toast("Wish cannot be empty."); return; }
-  customWishes[wishKey(categoryIndex, wishIndex)] = text;
-  saveCustomWishes(customWishes);
-  categories = buildCategories();
+  categories[categoryIndex].wishes[wishIndex] = text;
+  saveCategories();
   render();
   toast("Wish saved ✓");
 }
-
 function resetCurrentWish() {
   if (!confirm("Reset this wish back to the default?")) return;
-  delete customWishes[wishKey(categoryIndex, wishIndex)];
-  saveCustomWishes(customWishes);
-  categories = buildCategories();
+  if (defaultCategories[categoryIndex]?.wishes[wishIndex] !== undefined) {
+    categories[categoryIndex].wishes[wishIndex] = defaultCategories[categoryIndex].wishes[wishIndex];
+    saveCategories();
+  }
   render();
   toast("Wish restored to default.");
 }
@@ -203,100 +480,10 @@ $("cancelEditBtn").addEventListener("click", closeEditMode);
 $("saveWishBtn").addEventListener("click", saveCurrentWish);
 $("resetWishBtn").addEventListener("click", resetCurrentWish);
 
-// ─── Manage Wishes Dialog ─────────────────────────────────────────────────────
-function renderManageWishes() {
-  const list = $("manageWishesList");
-  list.innerHTML = categories.map((cat, ci) => `
-    <div class="mw-category">
-      <div class="mw-cat-header">${cat.emoji} ${cat.name}</div>
-      ${defaultCategories[ci].wishes.map((_, wi) => {
-        const custom = customWishes[wishKey(ci, wi)];
-        const current = custom ?? defaultCategories[ci].wishes[wi];
-        return `
-          <div class="mw-wish-row" data-ci="${ci}" data-wi="${wi}">
-            <div class="mw-wish-display">
-              <span class="mw-wish-text">${escapeHtml(current)}</span>
-              ${custom ? `<span class="mw-badge">edited</span>` : ""}
-            </div>
-            <div class="mw-wish-editor" hidden>
-              <textarea class="edit-textarea mw-textarea" rows="3" maxlength="300">${escapeHtml(current)}</textarea>
-              <div class="edit-actions">
-                ${custom ? `<button class="secondary-btn mw-reset-btn">↺ Reset</button>` : `<span></span>`}
-                <div class="edit-action-right">
-                  <button class="secondary-btn mw-cancel-btn">Cancel</button>
-                  <button class="primary-btn mw-save-btn">Save ✓</button>
-                </div>
-              </div>
-            </div>
-            <button class="mw-edit-btn secondary-btn">${custom ? "✎ Edited" : "✎ Edit"}</button>
-          </div>`;
-      }).join("")}
-    </div>
-  `).join("");
-
-  // Wire events for manage-wishes rows
-  list.querySelectorAll(".mw-wish-row").forEach(row => {
-    const ci = Number(row.dataset.ci), wi = Number(row.dataset.wi);
-    const display = row.querySelector(".mw-wish-display");
-    const editor = row.querySelector(".mw-wish-editor");
-    const editBtn = row.querySelector(".mw-edit-btn");
-    const cancelBtn = row.querySelector(".mw-cancel-btn");
-    const saveBtn = row.querySelector(".mw-save-btn");
-    const resetBtn = row.querySelector(".mw-reset-btn");
-    const textarea = row.querySelector(".mw-textarea");
-
-    editBtn.addEventListener("click", () => {
-      display.hidden = true;
-      editor.hidden = false;
-      editBtn.hidden = true;
-      textarea.focus();
-    });
-
-    cancelBtn.addEventListener("click", () => {
-      display.hidden = false;
-      editor.hidden = true;
-      editBtn.hidden = false;
-    });
-
-    saveBtn.addEventListener("click", () => {
-      const text = textarea.value.trim();
-      if (!text) { toast("Wish cannot be empty."); return; }
-      customWishes[wishKey(ci, wi)] = text;
-      saveCustomWishes(customWishes);
-      categories = buildCategories();
-      renderManageWishes();
-      render();
-      toast("Wish saved ✓");
-    });
-
-    if (resetBtn) {
-      resetBtn.addEventListener("click", () => {
-        if (!confirm("Reset this wish back to the default?")) return;
-        delete customWishes[wishKey(ci, wi)];
-        saveCustomWishes(customWishes);
-        categories = buildCategories();
-        renderManageWishes();
-        render();
-        toast("Wish restored to default.");
-      });
-    }
-  });
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-$("manageWishesBtn").addEventListener("click", () => {
-  $("settingsDialog").close();
-  renderManageWishes();
-  $("manageWishesDialog").showModal();
-});
-
-// ─── Navigation ───────────────────────────────────────────────────────────────
+// ─── Navigation ───────────────────────────────────────────────────
 function markRead() {
   readSet.add(wishKey(categoryIndex, wishIndex));
-  localStorage.setItem("1111-read", JSON.stringify([...readSet]));
+  localStorage.setItem(SK.READ, JSON.stringify([...readSet]));
 }
 
 $("prevBtn").addEventListener("click", () => {
@@ -305,10 +492,11 @@ $("prevBtn").addEventListener("click", () => {
 
 $("nextBtn").addEventListener("click", () => {
   markRead();
-  if (wishIndex < 10) { wishIndex++; render(); return; }
+  const totalInCat = categories[categoryIndex].wishes.length;
+  if (wishIndex < totalInCat - 1) { wishIndex++; render(); return; }
   $("wishKicker").hidden = true;
   $("wishText").hidden = true;
-  document.querySelector(".reading-prompt").hidden = true;
+  $("reading-prompt").hidden = true;
   $("prevBtn").hidden = true;
   $("nextBtn").hidden = true;
   $("editWishBtn").hidden = true;
@@ -319,56 +507,156 @@ $("nextBtn").addEventListener("click", () => {
 
 $("restartBtn").addEventListener("click", () => { wishIndex = 0; render(); });
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-$("settingsBtn").addEventListener("click", () => {
-  $("reminderTime").value = reminder;
-  $("settingsDialog").showModal();
-});
+// ─── Manage Wishes Dialog ─────────────────────────────────────────
+function renderManageWishes() {
+  const list = $("manageWishesList");
+  list.innerHTML = categories.map((cat, ci) => `
+    <div class="mw-category">
+      <div class="mw-cat-header">${cat.emoji} ${cat.name}</div>
+      ${cat.wishes.map((wish, wi) => {
+        const isDefault = wish === (defaultCategories[ci]?.wishes[wi] ?? "");
+        return `
+        <div class="mw-wish-row" data-ci="${ci}" data-wi="${wi}">
+          <div class="mw-wish-display">
+            <span class="mw-wish-text">${escapeHtml(wish)}</span>
+            <div class="mw-wish-actions">
+              ${!isDefault ? `<span class="mw-badge">edited</span>` : ""}
+              <button class="mw-del-btn" title="Delete wish" ${cat.wishes.length <= 1 ? "disabled" : ""}>×</button>
+            </div>
+          </div>
+          <div class="mw-wish-editor" hidden>
+            <textarea class="edit-textarea mw-textarea" rows="3" maxlength="300">${escapeHtml(wish)}</textarea>
+            <div class="edit-actions">
+              ${!isDefault ? `<button class="secondary-btn mw-reset-btn">↺ Default</button>` : "<span></span>"}
+              <div class="edit-action-right">
+                <button class="secondary-btn mw-cancel-btn">Cancel</button>
+                <button class="primary-btn mw-save-btn">Save ✓</button>
+              </div>
+            </div>
+          </div>
+          <button class="mw-edit-btn secondary-btn">${!isDefault ? "✎ Edited" : "✎ Edit"}</button>
+        </div>`;
+      }).join("")}
+      <div class="mw-add-panel" data-ci="${ci}">
+        <button class="mw-add-btn">+ Add intention</button>
+        <div class="mw-add-editor" hidden>
+          <textarea class="edit-textarea mw-textarea mw-add-textarea" rows="2" maxlength="300" placeholder="Write a new intention…"></textarea>
+          <div class="edit-actions">
+            <span></span>
+            <div class="edit-action-right">
+              <button class="secondary-btn mw-add-cancel">Cancel</button>
+              <button class="primary-btn mw-add-save">Add ✓</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join("");
 
-$("saveReminder").addEventListener("click", async () => {
-  reminder = $("reminderTime").value;
-  localStorage.setItem("1111-reminder", reminder);
-  if ("Notification" in window && Notification.permission === "default") {
-    try { await Notification.requestPermission(); } catch (e) {}
-  }
-  $("settingsDialog").close();
-  scheduleReminder();
-  toast(`Reminder preference saved: ${reminder}`);
-});
+  // Wire wish-row events
+  list.querySelectorAll(".mw-wish-row").forEach(row => {
+    const ci = Number(row.dataset.ci), wi = Number(row.dataset.wi);
+    const display = row.querySelector(".mw-wish-display");
+    const editor  = row.querySelector(".mw-wish-editor");
+    const editBtn = row.querySelector(".mw-edit-btn");
+    const cancelBtn = row.querySelector(".mw-cancel-btn");
+    const saveBtn = row.querySelector(".mw-save-btn");
+    const resetBtn = row.querySelector(".mw-reset-btn");
+    const delBtn  = row.querySelector(".mw-del-btn");
+    const textarea = row.querySelector(".mw-textarea");
 
-$("resetProgress").addEventListener("click", () => {
-  if (confirm("Reset all reading progress on this device?")) {
-    readSet = new Set();
-    localStorage.removeItem("1111-read");
-    $("settingsDialog").close();
-    render();
-    toast("Reading progress reset");
-  }
-});
+    editBtn.addEventListener("click", () => {
+      display.hidden = true; editor.hidden = false; editBtn.hidden = true; textarea.focus();
+    });
+    cancelBtn.addEventListener("click", () => {
+      display.hidden = false; editor.hidden = true; editBtn.hidden = false;
+    });
+    saveBtn.addEventListener("click", () => {
+      const text = textarea.value.trim();
+      if (!text) { toast("Wish cannot be empty."); return; }
+      categories[ci].wishes[wi] = text;
+      saveCategories();
+      renderManageWishes();
+      render();
+      toast("Wish saved ✓");
+    });
+    if (resetBtn) {
+      resetBtn.addEventListener("click", () => {
+        if (!confirm("Reset this wish to the default?")) return;
+        if (defaultCategories[ci]?.wishes[wi] !== undefined) {
+          categories[ci].wishes[wi] = defaultCategories[ci].wishes[wi];
+          saveCategories();
+          renderManageWishes();
+          render();
+          toast("Wish restored to default.");
+        }
+      });
+    }
+    if (delBtn && !delBtn.disabled) {
+      delBtn.addEventListener("click", () => {
+        if (!confirm("Delete this intention permanently?")) return;
+        categories[ci].wishes.splice(wi, 1);
+        saveCategories();
+        if (categoryIndex === ci && wishIndex >= categories[ci].wishes.length) {
+          wishIndex = Math.max(0, categories[ci].wishes.length - 1);
+        }
+        renderManageWishes();
+        render();
+        toast("Intention removed.");
+      });
+    }
+  });
 
-// ─── Reminder ─────────────────────────────────────────────────────────────────
-function scheduleReminder() {
-  if (reminderTimer) clearTimeout(reminderTimer);
-  if (!("Notification" in window)) return;
-  const now = new Date(), [h, m] = reminder.split(":").map(Number), next = new Date();
-  next.setHours(h, m, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  reminderTimer = setTimeout(async () => {
-    if (Notification.permission === "granted")
-      new Notification("11:11 Manifestation", { body: "Take a few minutes for your daily intentions.", icon: "./icons/icon-192.png" });
-    scheduleReminder();
-  }, next - now);
+  // Wire add-panel events
+  list.querySelectorAll(".mw-add-panel").forEach(panel => {
+    const ci = Number(panel.dataset.ci);
+    const addBtn    = panel.querySelector(".mw-add-btn");
+    const editor    = panel.querySelector(".mw-add-editor");
+    const cancelBtn = panel.querySelector(".mw-add-cancel");
+    const saveBtn   = panel.querySelector(".mw-add-save");
+    const textarea  = panel.querySelector(".mw-add-textarea");
+
+    addBtn.addEventListener("click", () => {
+      editor.hidden = false; addBtn.hidden = true; textarea.value = ""; textarea.focus();
+    });
+    cancelBtn.addEventListener("click", () => {
+      editor.hidden = true; addBtn.hidden = false;
+    });
+    saveBtn.addEventListener("click", () => {
+      const text = textarea.value.trim();
+      if (!text) { toast("Intention cannot be empty."); return; }
+      categories[ci].wishes.push(text);
+      saveCategories();
+      renderManageWishes();
+      render();
+      toast("Intention added ✓");
+    });
+  });
 }
 
-// ─── Service Worker ───────────────────────────────────────────────────────────
+// ─── Service Worker registration ──────────────────────────────────
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+  window.addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("./sw.js");
+      // Push saved alarms to SW on startup
+      await reg.ready;
+      const saved = loadAlarms().filter(a => a.enabled);
+      if (saved.length && reg.active) {
+        reg.active.postMessage({ type: "SCHEDULE_ALARM", alarms: saved });
+      }
+      registerPeriodicSync(reg);
+    } catch {}
+  });
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── In-page alarms on startup ────────────────────────────────────
+scheduleInPageAlarms(loadAlarms());
+
+// ─── Date label ───────────────────────────────────────────────────
 $("dateLabel").textContent = new Intl.DateTimeFormat("en-IN", {
   weekday: "long", day: "numeric", month: "long"
 }).format(new Date()).toUpperCase();
 
+// ─── Init ─────────────────────────────────────────────────────────
 render();
-scheduleReminder();

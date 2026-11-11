@@ -82,17 +82,30 @@
 
   <dialog id="settingsDialog">
     <form method="dialog" class="dialog-head">
-      <div><p class="eyebrow">PERSONALISE</p><h2>Reading settings</h2></div>
+      <div><p class="eyebrow">PERSONALISE</p><h2>Settings</h2></div>
       <button class="icon-btn" aria-label="Close">✕</button>
     </form>
-    <label class="setting-row"><span>Daily reminder</span><input type="time" id="reminderTime" value="07:00"></label>
-    <p class="setting-help">A reminder can be scheduled while this app is open. Browser notification support varies by device; this is not a guaranteed background alarm.</p>
-    <button class="primary-btn full" id="saveReminder">Save reminder time</button>
+
+    <!-- ── Alarms ── -->
+    <p class="setting-section-label">🔔 Daily Alarms</p>
+    <div id="alarmList" class="alarm-list"></div>
+    <button class="add-alarm-btn" id="addAlarmBtn">+ Add alarm</button>
+    <p class="setting-help" id="notifStatus">Notifications are <strong>not enabled</strong>. Save an alarm to request permission.</p>
+    <button class="primary-btn full" id="saveAlarms">Save alarms</button>
+    <button class="secondary-btn full" id="testAlarmBtn" style="margin-top:8px">🔔 Test alarm now</button>
+
     <div class="setting-divider"></div>
+
+    <!-- ── Progress ── -->
+    <p class="setting-section-label">📖 Reading Progress</p>
     <button class="secondary-btn full" id="resetProgress">Reset today's reading progress</button>
     <p class="setting-help">Your wishes and reading position are stored locally on this device.</p>
+
     <div class="setting-divider"></div>
-    <button class="secondary-btn full" id="manageWishesBtn">✎ Manage all wishes</button>
+
+    <!-- ── Wishes ── -->
+    <p class="setting-section-label">✎ Your Intentions</p>
+    <button class="secondary-btn full" id="manageWishesBtn">Manage all wishes</button>
     <p class="setting-help">Edit, personalise or restore any of your 44 intentions.</p>
   </dialog>
 
@@ -105,6 +118,20 @@
     <div id="manageWishesList" class="manage-wishes-list"></div>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- In-page alarm banner (shows when page is open at alarm time) -->
+  <div id="alarmBanner" class="alarm-banner" hidden aria-live="assertive" role="alert">
+    <div class="alarm-banner-icon">🔔</div>
+    <div class="alarm-banner-body">
+      <p class="alarm-banner-title">Time for your intentions</p>
+      <p class="alarm-banner-msg" id="alarmBannerMsg">Your daily ritual awaits.</p>
+    </div>
+    <div class="alarm-banner-actions">
+      <button class="alarm-banner-btn primary" id="alarmBannerOpen">Open</button>
+      <button class="alarm-banner-btn dismiss" id="alarmBannerClose">✕</button>
+    </div>
+  </div>
+
   <script src="./app.js"></script>
 </body>
 </html>
