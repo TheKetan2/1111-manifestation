@@ -15,12 +15,18 @@
   <main class="app-shell">
     <header class="topbar">
       <div class="brand">11:11 <span>MANIFESTATION</span></div>
-      <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings">⚙</button>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="themeQuickBtn" aria-label="Switch Theme" title="Switch Theme">🎨</button>
+        <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings">⚙</button>
+      </div>
     </header>
 
     <section class="hero">
       <div class="sunrise" aria-hidden="true"><span>☼</span></div>
-      <p class="eyebrow" id="dateLabel">YOUR DAILY RITUAL</p>
+      <div class="hero-meta">
+        <p class="eyebrow" id="dateLabel">YOUR DAILY RITUAL</p>
+        <span class="streak-badge" id="streakBadge" title="Daily streak">🔥 <span id="streakCount">0</span> day streak</span>
+      </div>
       <h1>Your life.<br><em>Your intentions.</em></h1>
       <p class="subhead">Read slowly. Reflect deeply. Take action.</p>
     </section>
@@ -60,7 +66,7 @@
       <div id="completePanel" class="complete-panel" hidden>
         <div class="complete-icon">✦</div>
         <h2>Category completed</h2>
-        <p>You have finished all 11 intentions in this category.</p>
+        <p id="completePanelText">You have finished all intentions in this category.</p>
         <button class="primary-btn" id="restartBtn">Read again</button>
       </div>
     </section>
@@ -76,7 +82,7 @@
 
     <footer>
       <p class="footer-quote">Make your intentions clear. Make your actions consistent.</p>
-      <p class="footer-author">Developed by Ketan Ramteke</p>
+      <p class="footer-author">Developed by Ketan D. Ramteke</p>
     </footer>
   </main>
 
@@ -85,6 +91,33 @@
       <div><p class="eyebrow">PERSONALISE</p><h2>Settings</h2></div>
       <button class="icon-btn" aria-label="Close">✕</button>
     </form>
+
+    <!-- ── Themes ── -->
+    <p class="setting-section-label">🎨 Aesthetic Theme</p>
+    <div class="theme-grid" id="themePicker">
+      <button class="theme-btn active" data-theme="midnight" type="button">
+        <span class="theme-swatch" style="background:#0b1220;border-color:#e8c98f;"></span>
+        <span class="theme-name">Midnight</span>
+      </button>
+      <button class="theme-btn" data-theme="amethyst" type="button">
+        <span class="theme-swatch" style="background:#110c1f;border-color:#f3b4d8;"></span>
+        <span class="theme-name">Amethyst</span>
+      </button>
+      <button class="theme-btn" data-theme="emerald" type="button">
+        <span class="theme-swatch" style="background:#081712;border-color:#9fe2bf;"></span>
+        <span class="theme-name">Emerald</span>
+      </button>
+      <button class="theme-btn" data-theme="sunset" type="button">
+        <span class="theme-swatch" style="background:#1c0e07;border-color:#f6b26b;"></span>
+        <span class="theme-name">Sunset</span>
+      </button>
+      <button class="theme-btn" data-theme="daybreak" type="button">
+        <span class="theme-swatch" style="background:#f5f4ef;border-color:#b38228;"></span>
+        <span class="theme-name">Daybreak</span>
+      </button>
+    </div>
+
+    <div class="setting-divider"></div>
 
     <!-- ── Alarms ── -->
     <p class="setting-section-label">🔔 Daily Alarms</p>
@@ -107,6 +140,12 @@
     <p class="setting-section-label">✎ Your Intentions</p>
     <button class="secondary-btn full" id="manageWishesBtn">Manage all wishes</button>
     <p class="setting-help">Edit, personalise or restore any of your 44 intentions.</p>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="secondary-btn" id="exportWishesBtn" style="flex:1">📤 Export</button>
+      <button class="secondary-btn" id="importWishesBtn" style="flex:1">📥 Import</button>
+      <input type="file" id="importFileInput" accept=".json" hidden>
+    </div>
+    <p class="setting-help">Back up your intentions as JSON or restore them on another device.</p>
   </dialog>
 
   <!-- Manage Wishes Dialog -->

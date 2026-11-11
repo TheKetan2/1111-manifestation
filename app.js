@@ -64,11 +64,100 @@ const SK = {
   CUSTOM:     "1111-custom-wishes",   // legacy – migrated on load
   READ:       "1111-read",
   ALARMS:     "1111-alarms",
+  THEME:      "1111-theme",
+  STREAK:     "1111-streak"
 };
+
+// ─── Themes ───────────────────────────────────────────────────────
+const THEMES = ["midnight", "amethyst", "emerald", "sunset", "daybreak"];
+const THEME_COLORS = {
+  midnight: "#0b1220",
+  amethyst: "#0d0817",
+  emerald:  "#071510",
+  sunset:   "#180d07",
+  daybreak: "#f6f5ef"
+};
+
+function getActiveTheme() {
+  return localStorage.getItem(SK.THEME) || "midnight";
+}
+
+function applyTheme(theme) {
+  if (!THEMES.includes(theme)) theme = "midnight";
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(SK.THEME, theme);
+
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme && THEME_COLORS[theme]) {
+    metaTheme.setAttribute("content", THEME_COLORS[theme]);
+  }
+
+  document.querySelectorAll("#themePicker .theme-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.theme === theme);
+  });
+}
+
+function cycleTheme() {
+  const current = getActiveTheme();
+  const nextIdx = (THEMES.indexOf(current) + 1) % THEMES.length;
+  const nextTheme = THEMES[nextIdx];
+  applyTheme(nextTheme);
+  const names = {
+    midnight: "Midnight 🌌",
+    amethyst: "Amethyst 🔮",
+    emerald:  "Emerald 🍃",
+    sunset:   "Sunset 🌅",
+    daybreak: "Daybreak ☀️"
+  };
+  toast(`Theme: ${names[nextTheme] || nextTheme}`);
+}
+
+// ─── Streak tracking ──────────────────────────────────────────────
+function getTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function getYesterdayStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function getStreakData() {
+  try {
+    return JSON.parse(localStorage.getItem(SK.STREAK) || '{"count":0,"lastDate":""}');
+  } catch {
+    return { count: 0, lastDate: "" };
+  }
+}
+function updateStreakBadge() {
+  const data = getStreakData();
+  const today = getTodayStr();
+  const yesterday = getYesterdayStr();
+  let count = data.count || 0;
+  if (data.lastDate && data.lastDate !== today && data.lastDate !== yesterday) {
+    count = 0;
+  }
+  const el = $("streakCount");
+  if (el) el.textContent = count;
+}
+function recordDailyProgress() {
+  const today = getTodayStr();
+  const yesterday = getYesterdayStr();
+  let data = getStreakData();
+  if (data.lastDate === today) return;
+  if (data.lastDate === yesterday) {
+    data.count = (data.count || 0) + 1;
+  } else {
+    data.count = 1;
+  }
+  data.lastDate = today;
+  localStorage.setItem(SK.STREAK, JSON.stringify(data));
+  updateStreakBadge();
+}
 
 // ─── Migrate legacy custom-wishes format ──────────────────────────
 (function migrateStorage() {
-  if (localStorage.getItem(SK.CATEGORIES)) return; // already migrated
+  if (localStorage.getItem(SK.CATEGORIES)) return;
   const old = localStorage.getItem(SK.CUSTOM);
   if (!old) return;
   try {
@@ -100,7 +189,6 @@ function isDefaultWish(ci, wi) {
 }
 
 // ─── Alarms ───────────────────────────────────────────────────────
-// alarm shape: { time: "07:30", label: "Morning ritual", enabled: true }
 function loadAlarms() {
   try { return JSON.parse(localStorage.getItem(SK.ALARMS) || "[]"); }
   catch { return []; }
@@ -108,7 +196,7 @@ function loadAlarms() {
 function saveAlarms(list) { localStorage.setItem(SK.ALARMS, JSON.stringify(list)); }
 
 let alarms = loadAlarms();
-let inPageTimers = []; // setTimeout handles for foreground fallback
+let inPageTimers = [];
 
 // ─── App state ────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -136,7 +224,7 @@ function msUntilTime(timeStr) {
   return target - now;
 }
 
-// ─── Alarm Sound (Web Audio API — works in-page) ──────────────────
+// ─── Alarm Sound (Web Audio API) ──────────────────────────────────
 function playAlarmSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -147,12 +235,11 @@ function playAlarmSound() {
       osc.type = "sine";
       osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
       gain.gain.setValueAtTime(0, ctx.currentTime + start);
-      gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + start + 0.01);
+      gain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + start + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
       osc.start(ctx.currentTime + start);
       osc.stop(ctx.currentTime + start + duration);
     }
-    // Three bell tones — classic alarm pattern
     bell(880, 0,   1.2);
     bell(880, 0.5, 1.2);
     bell(1047, 1.1, 1.5);
@@ -176,25 +263,21 @@ async function getSW() {
   try { return await navigator.serviceWorker.ready; } catch { return null; }
 }
 
-// Send alarm schedule to SW so it can fire even when page is backgrounded
 async function pushAlarmsToSW(list) {
   const reg = await getSW();
   if (!reg || !reg.active) return;
   reg.active.postMessage({ type: "SCHEDULE_ALARM", alarms: list });
 }
 
-// Register periodic background sync (Chrome/Android — fires even when closed)
 async function registerPeriodicSync(reg) {
   if (!("periodicSync" in reg)) return;
   try {
     const status = await navigator.permissions.query({ name: "periodic-background-sync" });
     if (status.state !== "granted") return;
-    // Register with minimum interval of 1 day
     await reg.periodicSync.register("1111-alarm", { minInterval: 24 * 60 * 60 * 1000 });
   } catch {}
 }
 
-// In-page fallback: setTimeout inside the page (while page is open/visible)
 function scheduleInPageAlarms(list) {
   inPageTimers.forEach(clearTimeout);
   inPageTimers = [];
@@ -204,7 +287,6 @@ function scheduleInPageAlarms(list) {
     const t = setTimeout(() => {
       playAlarmSound();
       showInPageAlarmBanner(alarm.label || "Time for your daily intentions!");
-      // Also fire SW notification if permission granted
       if (Notification.permission === "granted") {
         new Notification("🔔 11:11 Manifestation", {
           body: alarm.label || "Time for your daily intentions. Open the app and begin.",
@@ -214,7 +296,6 @@ function scheduleInPageAlarms(list) {
           vibrate: [300, 150, 300, 150, 600],
         });
       }
-      // Re-arm for next day
       const t2 = setTimeout(() => scheduleInPageAlarms(list), 1000);
       inPageTimers.push(t2);
     }, ms);
@@ -227,7 +308,6 @@ function showInPageAlarmBanner(message) {
   $("alarmBannerMsg").textContent = message;
   banner.hidden = false;
   banner.classList.add("visible");
-  // Dismiss automatically after 60s
   const t = setTimeout(() => dismissAlarmBanner(), 60000);
   banner._dismissTimer = t;
 }
@@ -239,7 +319,6 @@ function dismissAlarmBanner() {
   setTimeout(() => { banner.hidden = true; }, 350);
 }
 
-// ─── Update notification status text ─────────────────────────────
 function updateNotifStatus() {
   const el = $("notifStatus");
   if (!("Notification" in window)) {
@@ -278,7 +357,6 @@ function renderAlarmList() {
     </div>
   `).join("");
 
-  // Wire toggle, time, label, delete events
   container.querySelectorAll(".alarm-row").forEach(row => {
     const idx = Number(row.dataset.index);
     row.querySelector(".alarm-enabled").addEventListener("change", e => {
@@ -339,19 +417,18 @@ $("testAlarmBtn").addEventListener("click", async () => {
   }
 });
 
-// Alarm banner dismiss events
 $("alarmBannerClose").addEventListener("click", dismissAlarmBanner);
 $("alarmBannerOpen").addEventListener("click", () => {
   dismissAlarmBanner();
-  // scroll to reading card
   document.querySelector(".reading-card").scrollIntoView({ behavior: "smooth" });
 });
 
 // ─── Settings dialog open ─────────────────────────────────────────
 $("settingsBtn").addEventListener("click", () => {
-  alarms = loadAlarms(); // refresh from storage
+  alarms = loadAlarms();
   renderAlarmList();
   updateNotifStatus();
+  applyTheme(getActiveTheme());
   $("settingsDialog").showModal();
 });
 
@@ -373,7 +450,63 @@ $("manageWishesBtn").addEventListener("click", () => {
   $("manageWishesDialog").showModal();
 });
 
-// ─── SW message listener (acks from SW) ───────────────────────────
+// ─── Export / Import wishes ───────────────────────────────────────
+$("exportWishesBtn").addEventListener("click", () => {
+  const data = JSON.stringify({ categories, exportedAt: new Date().toISOString() }, null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "1111-manifestations.json";
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("Intentions exported 📤");
+});
+
+$("importWishesBtn").addEventListener("click", () => {
+  $("importFileInput").click();
+});
+
+$("importFileInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const parsed = JSON.parse(event.target.result);
+      if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+        categories = parsed.categories;
+        saveCategories();
+        render();
+        toast("Intentions imported successfully! 📥");
+      } else if (Array.isArray(parsed) && parsed.length > 0) {
+        categories = parsed;
+        saveCategories();
+        render();
+        toast("Intentions imported successfully! 📥");
+      } else {
+        toast("Invalid JSON format.");
+      }
+    } catch {
+      toast("Failed to parse JSON file.");
+    }
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+
+// ─── Theme Handlers ───────────────────────────────────────────────
+$("themeQuickBtn").addEventListener("click", cycleTheme);
+
+document.querySelectorAll("#themePicker .theme-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    applyTheme(btn.dataset.theme);
+    const themeName = btn.querySelector(".theme-name")?.textContent || btn.dataset.theme;
+    toast(`Theme set: ${themeName}`);
+  });
+});
+
+// ─── SW message listener ──────────────────────────────────────────
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", event => {
     if (event.data?.type === "ALARMS_SCHEDULED") {
@@ -394,7 +527,7 @@ function renderCategories() {
       categoryIndex = Number(btn.dataset.category);
       wishIndex = 0;
       closeEditMode();
-      render();
+      render("next");
     })
   );
 }
@@ -407,24 +540,38 @@ function renderOverall() {
   $("overallProgress").style.width = `${pct}%`;
   $("totalLabel").textContent = `${total} intentions`;
   $("sessionNote").textContent = `${total} intentions · ${categories.length} categories · One stronger you`;
+  updateStreakBadge();
 }
 
-// ─── Render: reading card ─────────────────────────────────────────
-function render() {
+// ─── Render: reading card with animation ──────────────────────────
+function render(direction = null) {
   const c = categories[categoryIndex];
   const totalInCat = c.wishes.length;
-  // Clamp index in case wishes were deleted
   wishIndex = Math.min(wishIndex, totalInCat - 1);
   const wish = c.wishes[wishIndex];
 
   $("categoryLabel").textContent = `${c.emoji} ${c.name.toUpperCase()}`;
   $("wishCounter").textContent = `${String(wishIndex + 1).padStart(2, "0")} / ${totalInCat}`;
   $("wishKicker").textContent = `WISH NO. ${wishIndex + 1}`;
-  $("wishText").textContent = wish;
+
+  const wishEl = $("wishText");
+  wishEl.textContent = wish;
+  wishEl.classList.remove("anim-slide-next", "anim-slide-prev");
+  if (direction === "next") {
+    void wishEl.offsetWidth; // force reflow for smooth re-trigger
+    wishEl.classList.add("anim-slide-next");
+  } else if (direction === "prev") {
+    void wishEl.offsetWidth;
+    wishEl.classList.add("anim-slide-prev");
+  }
+
   $("categoryProgress").style.width = `${(wishIndex + 1) / totalInCat * 100}%`;
   $("prevBtn").disabled = wishIndex === 0;
   $("nextBtn").textContent = wishIndex === totalInCat - 1 ? "Complete category ✓" : "Next wish →";
   $("completePanel").hidden = true;
+
+  const cpText = $("completePanelText");
+  if (cpText) cpText.textContent = `You have finished all ${totalInCat} intentions in this category.`;
 
   const editBtn = $("editWishBtn");
   editBtn.textContent = isDefaultWish(categoryIndex, wishIndex) ? "✎ Edit wish" : "✎ Edited";
@@ -487,13 +634,21 @@ function markRead() {
 }
 
 $("prevBtn").addEventListener("click", () => {
-  if (wishIndex > 0) { wishIndex--; render(); }
+  if (wishIndex > 0) {
+    wishIndex--;
+    render("prev");
+  }
 });
 
 $("nextBtn").addEventListener("click", () => {
   markRead();
+  recordDailyProgress();
   const totalInCat = categories[categoryIndex].wishes.length;
-  if (wishIndex < totalInCat - 1) { wishIndex++; render(); return; }
+  if (wishIndex < totalInCat - 1) {
+    wishIndex++;
+    render("next");
+    return;
+  }
   $("wishKicker").hidden = true;
   $("wishText").hidden = true;
   $("reading-prompt").hidden = true;
@@ -505,7 +660,10 @@ $("nextBtn").addEventListener("click", () => {
   renderOverall();
 });
 
-$("restartBtn").addEventListener("click", () => { wishIndex = 0; render(); });
+$("restartBtn").addEventListener("click", () => {
+  wishIndex = 0;
+  render("next");
+});
 
 // ─── Manage Wishes Dialog ─────────────────────────────────────────
 function renderManageWishes() {
@@ -553,7 +711,6 @@ function renderManageWishes() {
     </div>
   `).join("");
 
-  // Wire wish-row events
   list.querySelectorAll(".mw-wish-row").forEach(row => {
     const ci = Number(row.dataset.ci), wi = Number(row.dataset.wi);
     const display = row.querySelector(".mw-wish-display");
@@ -607,7 +764,6 @@ function renderManageWishes() {
     }
   });
 
-  // Wire add-panel events
   list.querySelectorAll(".mw-add-panel").forEach(panel => {
     const ci = Number(panel.dataset.ci);
     const addBtn    = panel.querySelector(".mw-add-btn");
@@ -639,7 +795,6 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", async () => {
     try {
       const reg = await navigator.serviceWorker.register("./sw.js");
-      // Push saved alarms to SW on startup
       await reg.ready;
       const saved = loadAlarms().filter(a => a.enabled);
       if (saved.length && reg.active) {
@@ -650,13 +805,13 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   });
 }
 
-// ─── In-page alarms on startup ────────────────────────────────────
+// ─── Initialize ───────────────────────────────────────────────────
+applyTheme(getActiveTheme());
 scheduleInPageAlarms(loadAlarms());
+updateStreakBadge();
 
-// ─── Date label ───────────────────────────────────────────────────
 $("dateLabel").textContent = new Intl.DateTimeFormat("en-IN", {
   weekday: "long", day: "numeric", month: "long"
 }).format(new Date()).toUpperCase();
 
-// ─── Init ─────────────────────────────────────────────────────────
 render();
