@@ -593,16 +593,18 @@ function render(direction = null) {
 function openEditMode() {
   $("editTextarea").value = categories[categoryIndex].wishes[wishIndex];
   $("editPanel").hidden = false;
-  $("wishText").hidden = true;
-  $("reading-prompt").hidden = true;
-  $("editWishBtn").hidden = true;
+  $("editPanel").classList.add("active");
+  $("wishText").style.display = "none";
+  $("reading-prompt").style.display = "none";
+  $("editWishBtn").style.display = "none";
   $("editTextarea").focus();
 }
 function closeEditMode() {
   $("editPanel").hidden = true;
-  $("wishText").hidden = false;
-  $("reading-prompt").hidden = false;
-  $("editWishBtn").hidden = false;
+  $("editPanel").classList.remove("active");
+  $("wishText").style.display = "";
+  $("reading-prompt").style.display = "";
+  $("editWishBtn").style.display = "";
 }
 function saveCurrentWish() {
   const text = $("editTextarea").value.trim();
