@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="Your personal daily manifestation and affirmation reader.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>11:11 Manifestation</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">11:11 <span>MANIFESTATION</span></div>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings">⚙</button>
+    </header>
+
+    <section class="hero">
+      <div class="sunrise" aria-hidden="true"><span>☼</span></div>
+      <p class="eyebrow" id="dateLabel">YOUR DAILY RITUAL</p>
+      <h1>Your life.<br><em>Your intentions.</em></h1>
+      <p class="subhead">Read slowly. Reflect deeply. Take action.</p>
+    </section>
+
+    <section class="category-section">
+      <div class="section-heading"><h2>Your categories</h2><span id="totalLabel">44 intentions</span></div>
+      <div class="category-grid" id="categoryGrid"></div>
+    </section>
+
+    <section class="reading-card" aria-live="polite">
+      <div class="reading-meta">
+        <span id="categoryLabel" class="category-pill">🧬 HEALTH</span>
+        <span id="wishCounter">01 / 11</span>
+      </div>
+      <div class="progress-track"><div id="categoryProgress" class="progress-fill"></div></div>
+      <p class="wish-kicker" id="wishKicker">WISH NO. 1</p>
+      <h2 id="wishText">I enjoy excellent physical, mental and emotional health throughout my life.</h2>
+      <p id="reading-prompt" class="reading-prompt">READ&nbsp; · &nbsp;REFLECT&nbsp; · &nbsp;BELIEVE&nbsp; · &nbsp;ACT</p>
+      <div class="controls">
+        <button class="secondary-btn" id="prevBtn" disabled>← Previous</button>
+        <button class="primary-btn" id="nextBtn">Next wish →</button>
+      </div>
+      <div id="completePanel" class="complete-panel" hidden>
+        <div class="complete-icon">✦</div>
+        <h2>Category completed</h2>
+        <p>You have finished all 11 intentions in this category.</p>
+        <button class="primary-btn" id="restartBtn">Read again</button>
+      </div>
+    </section>
+
+    <section class="overall-section">
+      <div class="overall-top">
+        <div><strong id="readCount">0 / 44</strong><span>Read in this session</span></div>
+        <div class="percentage"><strong id="overallPercent">0%</strong><span>Overall progress</span></div>
+      </div>
+      <div class="progress-track overall-track"><div id="overallProgress" class="progress-fill"></div></div>
+      <p class="small-note" id="sessionNote">44 intentions · 4 categories · One stronger you</p>
+    </section>
+
+    <footer>Make your intentions clear. Make your actions consistent.</footer>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="dialog-head">
+      <div><p class="eyebrow">PERSONALISE</p><h2>Reading settings</h2></div>
+      <button class="icon-btn" aria-label="Close">✕</button>
+    </form>
+    <label class="setting-row"><span>Daily reminder</span><input type="time" id="reminderTime" value="07:00"></label>
+    <p class="setting-help">A reminder can be scheduled while this app is open. Browser notification support varies by device; this is not a guaranteed background alarm.</p>
+    <button class="primary-btn full" id="saveReminder">Save reminder time</button>
+    <div class="setting-divider"></div>
+    <button class="secondary-btn full" id="resetProgress">Reset today's reading progress</button>
+    <p class="setting-help">Your wishes and reading position are stored locally on this device.</p>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
